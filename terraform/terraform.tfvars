@@ -1,6 +1,5 @@
-project_id  = "your-gcp-project-id"
-region      = "asia-south1"
-location    = "asia-south1"
+location    = "us-central1"
+project_id  = "encoded-alpha-457108-e8"
 environment = "dev"
 prefix      = "carshub"
 
