@@ -6,10 +6,10 @@
   "author": "Google Inc.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GoogleCloudPlatform/nodejs-docs-samples.git"
+    "url": "git+https://github.com/GoogleCloudPlatform/nodejs-docs-samples.git"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22"
   },
   "scripts": {
     "test": "c8 mocha -p -j 2 test/*.test.js --timeout=20000"
@@ -23,5 +23,15 @@
   "dependencies": {
     "@google-cloud/functions-framework": "^4.0.0",
     "@google-cloud/sql": "^0.20.1"
-  }
+  },
+  "description": "<img src=\"https://avatars2.githubusercontent.com/u/2810941?v=3&s=96\" alt=\"Google Cloud Platform logo\" title=\"Google Cloud Platform\" align=\"right\" height=\"96\" width=\"96\"/>",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "keywords": [],
+  "bugs": {
+    "url": "https://github.com/GoogleCloudPlatform/nodejs-docs-samples/issues"
+  },
+  "homepage": "https://github.com/GoogleCloudPlatform/nodejs-docs-samples#readme"
 }

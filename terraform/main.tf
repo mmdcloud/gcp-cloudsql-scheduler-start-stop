@@ -1,5 +1,31 @@
+resource "google_project_service" "apis" {
+  for_each = toset([
+    "sqladmin.googleapis.com",
+    "servicenetworking.googleapis.com",
+    "cloudscheduler.googleapis.com",
+    "pubsub.googleapis.com",
+    "eventarc.googleapis.com",
+    "run.googleapis.com",
+    "cloudfunctions.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "compute.googleapis.com",
+    "monitoring.googleapis.com",
+  ])
+  project            = var.project_id
+  service            = each.value
+  disable_on_destroy = false
+}
+
+resource "google_project_service_identity" "scheduler" {
+  provider   = google-beta
+  project    = var.project_id
+  service    = "cloudscheduler.googleapis.com"
+  depends_on = [google_project_service.apis]
+}
+
 locals {
-  scheduler_agent   = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+  scheduler_agent   = "serviceAccount:${google_project_service_identity.scheduler.email}"
   sql_instance_name = "db-instance"
 }
 
@@ -7,7 +33,9 @@ data "vault_generic_secret" "sql" {
   path = "secret/sql"
 }
 
-data "google_project" "project" {}
+data "google_project" "project" {
+  project_id = var.project_id
+}
 
 module "vpc" {
   source                          = "./modules/vpc"
@@ -94,6 +122,7 @@ module "db" {
     }
   ]
 
+  user_labels   = { env = "dev" }
   vpc_self_link = module.vpc.self_link
   vpc_id        = module.vpc.vpc_id
   password      = module.sql_password_secret.secret_data
@@ -115,9 +144,13 @@ resource "google_project_iam_member" "eventarc_receiver" {
 }
 
 resource "google_cloud_run_service_iam_member" "eventarc_invoker" {
+  for_each = {
+    start = module.start_instance_handler_function.function_name
+    stop  = module.stop_instance_handler_function.function_name
+  }
   project  = var.project_id
   location = var.location
-  service  = module.handler_function.function_name # 2nd gen function's Cloud Run service shares the name
+  service  = each.value
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.eventarc.email}"
 }
@@ -146,13 +179,13 @@ module "start_sql_trigger" {
 
   destination = {
     cloud_run_service = {
-      service = module.handler_function.function_name
+      service = module.start_instance_handler_function.function_name
       region  = var.location
     }
   }
 
   depends_on = [
-    module.handler_function,
+    module.start_instance_handler_function,
     module.start_topic,
     google_project_iam_member.eventarc_receiver,
     google_cloud_run_service_iam_member.eventarc_invoker,
@@ -183,14 +216,14 @@ module "stop_sql_trigger" {
 
   destination = {
     cloud_run_service = {
-      service = module.handler_function.function_name
+      service = module.stop_instance_handler_function.function_name
       region  = var.location
     }
   }
 
   depends_on = [
-    module.handler_function,
-    module.start_topic,
+    module.stop_instance_handler_function,
+    module.stop_topic,
     google_project_iam_member.eventarc_receiver,
     google_cloud_run_service_iam_member.eventarc_invoker,
   ]
@@ -207,21 +240,22 @@ resource "google_monitoring_alert_policy" "sql_schedule_failures" {
   combiner     = "OR"
 
   conditions {
-    display_name = "handler errors"
+    display_name = "handler or scheduler errors"
     condition_matched_log {
-      filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"handler-function\" AND severity>=ERROR"
-    }
-  }
-  conditions {
-    display_name = "scheduler job errors"
-    condition_matched_log {
-      filter = "resource.type=\"cloud_scheduler_job\" AND severity>=ERROR"
+      filter = <<-EOT
+        (resource.type="cloud_run_revision" AND resource.labels.service_name=~"(start|stop)-handler-function" AND severity>=ERROR)
+        OR
+        (resource.type="cloud_scheduler_job" AND severity>=ERROR)
+      EOT
     }
   }
 
   alert_strategy {
-    notification_rate_limit { period = "300s" }
+    notification_rate_limit {
+      period = "300s"
+    }
   }
+
   notification_channels = [google_monitoring_notification_channel.email.id]
 }
 
@@ -273,7 +307,7 @@ module "stop_scheduler" {
     topic_name = module.stop_topic.topic_id
     data       = base64encode(jsonencode({ action = "stop", label = "env=dev" }))
   }
-  
+
   depends_on = [
     module.stop_topic,
   ]
@@ -344,16 +378,51 @@ module "function_app_service_account" {
   ]
 }
 
-module "handler_function" {
+module "start_instance_handler_function" {
   source               = "./modules/cloud-run-function/event-function"
-  function_name        = "handler-function"
-  function_description = "A function to manage the status of the cloud sql instance based on pubsub payload"
+  function_name        = "start-handler-function"
+  function_description = "A function to start the cloud sql instance based on pubsub payload"
   location             = var.location
   project_id           = var.project_id
 
   build_config = {
-    handler = "handler"
-    runtime = "python312"
+    handler = "startInstanceEvent"
+    runtime = "nodejs22"
+    storage_source = {
+      bucket = module.handler_function_bucket_code.bucket_name
+      object = module.handler_function_bucket_code.bucket_objects["handler_function_bucket_code.zip"].name
+    }
+  }
+
+  service_config = {
+    max_instance_count               = 2
+    min_instance_count               = 0
+    available_memory                 = "256M"
+    timeout_seconds                  = 60
+    max_instance_request_concurrency = 80
+    service_environment_variables = {
+      PROJECT_ID    = var.project_id
+      INSTANCE_NAME = local.sql_instance_name
+    }
+    available_cpu                  = "1"
+    ingress_settings               = "ALLOW_INTERNAL_ONLY"
+    all_traffic_on_latest_revision = true
+    service_account_email          = module.function_app_service_account.sa_email
+  }
+
+  depends_on = [module.function_app_service_account]
+}
+
+module "stop_instance_handler_function" {
+  source               = "./modules/cloud-run-function/event-function"
+  function_name        = "stop-handler-function"
+  function_description = "A function to stop the cloud sql instance based on pubsub payload"
+  location             = var.location
+  project_id           = var.project_id
+
+  build_config = {
+    handler = "stopInstanceEvent"
+    runtime = "nodejs22"
     storage_source = {
       bucket = module.handler_function_bucket_code.bucket_name
       object = module.handler_function_bucket_code.bucket_objects["handler_function_bucket_code.zip"].name

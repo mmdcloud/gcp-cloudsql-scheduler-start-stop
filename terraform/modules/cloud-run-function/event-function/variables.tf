@@ -113,9 +113,9 @@ variable "service_config" {
 
 variable "event_trigger" {
   description = "Eventarc/PubSub trigger configuration."
-  default = {}
+  default     = null
   type = object({
-    event_type            = string
+    event_type            = optional(string)
     trigger_region        = optional(string)
     pubsub_topic          = optional(string)
     service_account_email = optional(string)
@@ -128,9 +128,9 @@ variable "event_trigger" {
   })
 
   validation {
-    condition = (
-      var.event_trigger.event_type != "google.cloud.pubsub.topic.v1.messagePublished" ||
-      var.event_trigger.pubsub_topic != null
+    condition = var.event_trigger == null ? true : (
+      try(var.event_trigger.event_type, null) != "google.cloud.pubsub.topic.v1.messagePublished" ||
+      try(var.event_trigger.pubsub_topic, null) != null
     )
     error_message = "When event_type is 'google.cloud.pubsub.topic.v1.messagePublished', 'pubsub_topic' must be specified."
   }

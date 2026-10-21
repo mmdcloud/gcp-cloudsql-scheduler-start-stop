@@ -18,6 +18,17 @@ variable "location" {
   default     = "asia-south1"
 }
 
+variable "alert_email" {
+  description = "Email for sending alerts"
+  type        = string
+  default     = null
+}
+
+variable "user_labels" {
+  type    = map(string)
+  default = {}
+}
+
 variable "environment" {
   description = "Environment name (dev, staging, prod). Used in resource naming"
   type        = string

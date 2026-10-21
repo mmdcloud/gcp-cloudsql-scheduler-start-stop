@@ -15,7 +15,7 @@ resource "google_pubsub_schema_iam_binding" "schema_binding" {
 # Non-authoritative additive (Members)
 resource "google_pubsub_schema_iam_member" "schema_member" {
   for_each = var.enable_schema ? {
-    for idx, item in var.schema_iam.members : "${item.role}-${item.member}" => item
+    for idx, item in var.schema_iam.members : "${item.role}-${idx}" => item
   } : {}
 
   project = var.project_id
@@ -43,7 +43,7 @@ resource "google_pubsub_topic_iam_binding" "topic_binding" {
 resource "google_pubsub_topic_iam_member" "topic_member" {
   for_each = {
     for idx, item in(var.topic_iam.members != null ? var.topic_iam.members : []) :
-    "${item.role}-${item.member}" => item
+    "${item.role}-${idx}" => item
   }
 
   project = var.project_id
@@ -72,11 +72,12 @@ locals {
 
   subscription_iam_members = flatten([
     for sub_key, sub in var.subscriptions : [
-      for item in(sub.iam.members != null ? sub.iam.members : []) : {
+      for idx, item in(sub.iam.members != null ? sub.iam.members : []) : {
         sub_key = sub_key
         sub_name = sub.subscription_name
         role    = item.role
         member  = item.member
+        idx     = idx
       }
     ]
   ])
@@ -99,7 +100,7 @@ resource "google_pubsub_subscription_iam_binding" "subscription_binding" {
 resource "google_pubsub_subscription_iam_member" "subscription_member" {
   for_each = {
     for item in local.subscription_iam_members :
-    "${item.sub_key}.${item.role}.${item.member}" => item
+    "${item.sub_key}.${item.role}.${item.idx}" => item
   }
 
   project      = var.project_id

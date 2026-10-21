@@ -1,6 +1,6 @@
 locals {
   # Default to function location if trigger_region is omitted
-  trigger_location = coalesce(var.event_trigger.trigger_region, var.location)
+  trigger_location = coalesce(try(var.event_trigger.trigger_region, null), var.location)
 }
 
 resource "google_cloudfunctions2_function" "function" {
@@ -56,10 +56,10 @@ resource "google_cloudfunctions2_function" "function" {
       available_cpu                    = service_config.value.available_cpu
       timeout_seconds                  = service_config.value.timeout_seconds
       # Default event functions to internal-only ingress for security
-      ingress_settings                 = coalesce(service_config.value.ingress_settings, "ALLOW_INTERNAL_ONLY")
-      all_traffic_on_latest_revision   = service_config.value.all_traffic_on_latest_revision
-      service_account_email            = service_config.value.service_account_email
-      environment_variables            = service_config.value.service_environment_variables
+      ingress_settings               = coalesce(service_config.value.ingress_settings, "ALLOW_INTERNAL_ONLY")
+      all_traffic_on_latest_revision = service_config.value.all_traffic_on_latest_revision
+      service_account_email          = service_config.value.service_account_email
+      environment_variables          = service_config.value.service_environment_variables
 
       vpc_connector                 = service_config.value.vpc_connector
       vpc_connector_egress_settings = service_config.value.vpc_connector != null ? try(service_config.value.vpc_connector_egress_settings, null) : null
@@ -95,19 +95,22 @@ resource "google_cloudfunctions2_function" "function" {
     }
   }
 
-  event_trigger {
-    trigger_region        = local.trigger_location
-    event_type            = var.event_trigger.event_type
-    pubsub_topic          = var.event_trigger.pubsub_topic
-    service_account_email = var.event_trigger.service_account_email
-    retry_policy          = var.event_trigger.retry_policy
+  dynamic "event_trigger" {
+    for_each = (var.event_trigger != null && try(var.event_trigger.event_type, null) != null) ? [var.event_trigger] : []
+    content {
+      trigger_region        = local.trigger_location
+      event_type            = event_trigger.value.event_type
+      pubsub_topic          = event_trigger.value.pubsub_topic
+      service_account_email = event_trigger.value.service_account_email
+      retry_policy          = event_trigger.value.retry_policy
 
-    dynamic "event_filters" {
-      for_each = coalesce(var.event_trigger.event_filters, [])
-      content {
-        attribute = event_filters.value.attribute
-        value     = event_filters.value.value
-        operator  = event_filters.value.operator
+      dynamic "event_filters" {
+        for_each = coalesce(event_trigger.value.event_filters, [])
+        content {
+          attribute = event_filters.value.attribute
+          value     = event_filters.value.value
+          operator  = event_filters.value.operator
+        }
       }
     }
   }
@@ -127,7 +130,7 @@ resource "google_cloudfunctions2_function" "function" {
 # IAM: Authorize the Trigger Identity to Invoke the Underlying Cloud Run Service
 # -----------------------------------------------------------------------------
 resource "google_cloud_run_service_iam_member" "event_invoker" {
-  count = var.event_trigger.service_account_email != null ? 1 : 0
+  count = try(var.event_trigger.service_account_email, null) != null ? 1 : 0
 
   project  = var.project_id
   location = google_cloudfunctions2_function.function.location

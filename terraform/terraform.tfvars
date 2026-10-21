@@ -13,3 +13,4 @@ labels = {
   environment = "dev"
   managed_by  = "terraform"
 }
+alert_email = "mohitfury1997@gmail.com"
