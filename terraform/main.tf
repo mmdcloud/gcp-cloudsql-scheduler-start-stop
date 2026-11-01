@@ -361,7 +361,7 @@ module "handler_function_bucket_code" {
 }
 
 resource "google_project_iam_custom_role" "sql_start_stop" {
-  role_id     = "cloudSqlStartStop"
+  role_id     = "cloudSqlStartStopV2" # or cloud_sql_start_stop
   title       = "Cloud SQL Start/Stop"
   permissions = ["cloudsql.instances.get", "cloudsql.instances.list", "cloudsql.instances.update"]
 }
